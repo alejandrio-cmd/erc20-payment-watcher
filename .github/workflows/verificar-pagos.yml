@@ -1,0 +1,29 @@
+# Cada 5 minutos revisa las transferencias a la wallet y activa suscripciones.
+# Secrets: FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio), PAGOS_CONFIG (config real en JSON), RPC_URL (opcional).
+# Codigo de salida 2 = entro un pago sin pedido: revisar la coleccion payments (status unmatched).
+name: Verificar pagos
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verificar-pagos
+  cancel-in-progress: false
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev --no-audit --no-fund
+      - run: node verificar-pagos.cjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PAGOS_CONFIG: ${{ secrets.PAGOS_CONFIG }}
+          RPC_URL: ${{ secrets.RPC_URL }}
