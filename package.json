@@ -1,0 +1,15 @@
+{
+  "name": "erc20-payment-watcher",
+  "private": true,
+  "description": "Watches ERC-20 transfers to a wallet and activates Firestore subscriptions",
+  "scripts": {
+    "start": "node verificar-pagos.cjs",
+    "dry": "node verificar-pagos.cjs --dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
+}

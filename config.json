@@ -1,0 +1,49 @@
+{
+  "network": "Ethereum (ERC20)",
+  "networkId": "ethereum",
+  "chainId": 1,
+  "rpcUrl": "https://ethereum-rpc.publicnode.com",
+  "explorerTx": "https://etherscan.io/tx/",
+  "wallet": "0x0000000000000000000000000000000000000000",
+  "confirmations": 12,
+  "firstRunLookback": 300,
+  "orderMinutes": 60,
+  "payableMinutes": 180,
+  "daysPerPayment": 30,
+  "tokens": {
+    "USDT": {
+      "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "decimals": 6
+    },
+    "USDC": {
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "decimals": 6
+    }
+  },
+  "plans": {
+    "plan-a": {
+      "price": 10,
+      "grant": {
+        "plan": "basic",
+        "rooms": [
+          "a"
+        ]
+      }
+    },
+    "plan-b": {
+      "price": 25,
+      "grant": {
+        "plan": "pro",
+        "rooms": [
+          "a",
+          "b"
+        ]
+      }
+    }
+  },
+  "planRank": {
+    "trial": 0,
+    "basic": 1,
+    "pro": 2
+  }
+}
