@@ -52,13 +52,29 @@ async function run({db,rpc,cfg,emailOf,dry=false,log=console.log,now=()=>Date.no
   const base={txHash:t.txHash,logIndex:t.logIndex,blockNumber:t.blockNumber,blockTime:Timestamp.fromMillis(t.blockTimeMs),
    token:t.token,from:t.from,amount:t.micro?L.formatMicro(t.micro):t.raw,micro:t.micro,network:cfg.network,explorer:cfg.explorerTx+t.txHash,seenAt:FieldValue.serverTimestamp()};
   return db.runTransaction(async tx=>{
-   if((await tx.get(payRef)).exists)return {status:'repetido'};
-   const lockRef=t.micro?db.doc('amountLocks/'+t.micro):null;
+   // Ya registrado: si se acredito (solo o a mano) no se toca. Un "unmatched" se vuelve a evaluar, asi
+   // reprocesar (bajar pagosState.lastBlock) recupera los pagos que quedaron sin asignar.
+   const prevPay=await tx.get(payRef);
+   if(prevPay.exists&&prevPay.data().status!=='unmatched')return {status:'repetido'};
+   if(prevPay.exists&&prevPay.data().seenAt)base.seenAt=prevPay.data().seenAt;
+   let lockRef=t.micro?db.doc('amountLocks/'+t.micro):null;
    const lockSnap=lockRef?await tx.get(lockRef):null;
-   const lock=lockSnap&&lockSnap.exists?{...lockSnap.data(),createdAtMs:tsMs(lockSnap.data().createdAt)}:null;
+   let lock=lockSnap&&lockSnap.exists?{...lockSnap.data(),createdAtMs:tsMs(lockSnap.data().createdAt)}:null;
    let reason=t.micro?L.lockAccepts(lock,t.blockTimeMs,cfg.payableMinutes):'monto no reconocido';
+   // Ningun pedido con ese monto exacto: si hay un unico pedido abierto en la ventana que el pago cubre
+   // (por ejemplo 125.5 para el pedido 125.0500), el pago es de ese pedido.
+   let approx=false;
+   if(t.micro&&!lock){
+    const since=Timestamp.fromMillis(t.blockTimeMs-cfg.payableMinutes*60000-120000);
+    const recent=(await tx.get(db.collection('amountLocks').where('createdAt','>=',since))).docs
+     .map(d=>({...d.data(),createdAtMs:tsMs(d.data().createdAt),ref:d.ref}));
+    const pick=L.pickApprox(L.approxCandidates(recent,t.micro,t.blockTimeMs,cfg));
+    reason=pick.reason;
+    if(pick.lock){lock=pick.lock;lockRef=pick.lock.ref;approx=true;}
+   }
+   const lockMicro=approx?lock.amountMicro:t.micro;
    const plan=!reason&&cfg.plans[lock.planId];
-   const tag=plan?(t.micro-plan.price*1e6)/L.TAG_STEP:0;
+   const tag=plan?(lockMicro-plan.price*1e6)/L.TAG_STEP:0;
    if(!reason&&(!plan||lock.priceUsd!==plan.price||!Number.isInteger(tag)||tag<1||tag>L.TAG_MAX))reason='el pedido no coincide con un plan vigente';
    if(reason){
     if(!dry)tx.set(payRef,{...base,status:'unmatched',reason});
@@ -73,11 +89,12 @@ async function run({db,rpc,cfg,emailOf,dry=false,log=console.log,now=()=>Date.no
    if(!dry){
     tx.set(subRef,subUpdate,{merge:true});
     tx.update(lockRef,{status:'paid',paymentId:t.id});
-    if(checkoutSnap.exists&&checkoutSnap.data().amountMicro===t.micro)
+    if(checkoutSnap.exists&&checkoutSnap.data().amountMicro===lockMicro)
      tx.update(checkoutRef,{status:'paid',paymentId:t.id,txHash:t.txHash,paidAt:FieldValue.serverTimestamp(),paidUntil:Timestamp.fromMillis(expires)});
-    tx.set(payRef,{...base,status:'credited',uid:lock.uid,planId:lock.planId,priceUsd:plan.price,expiresAt:Timestamp.fromMillis(expires)});
+    tx.set(payRef,{...base,status:'credited',uid:lock.uid,planId:lock.planId,priceUsd:plan.price,expiresAt:Timestamp.fromMillis(expires),
+     ...(approx?{approx:true,orderAmount:L.formatMicro(lockMicro)}:{})});
    }
-   return {status:'credited',uid:lock.uid,planId:lock.planId,until:new Date(expires).toISOString()};
+   return {status:'credited',uid:lock.uid,planId:lock.planId,until:new Date(expires).toISOString(),...(approx?{approx:L.formatMicro(lockMicro)}:{})};
   });
  }
 
@@ -97,7 +114,7 @@ async function run({db,rpc,cfg,emailOf,dry=false,log=console.log,now=()=>Date.no
    const t=L.parseTransfer(entry,cfg);if(!t)continue;
    t.blockTimeMs=await blockTime(t.blockNumber);
    const r=await processTransfer(t);
-   const line=`${r.status.padEnd(9)} ${t.micro?L.formatMicro(t.micro):t.raw} ${t.token} ${t.txHash}${r.uid?' -> '+r.uid+' '+r.planId+' hasta '+r.until:''}${r.reason?' ('+r.reason+')':''}`;
+   const line=`${r.status.padEnd(9)} ${t.micro?L.formatMicro(t.micro):t.raw} ${t.token} ${t.txHash}${r.uid?' -> '+r.uid+' '+r.planId+' hasta '+r.until:''}${r.approx?' (monto aproximado; pedido de '+r.approx+')':''}${r.reason?' ('+r.reason+')':''}`;
    log(line);results.push({...r,id:t.id,line});
   }
   if(!dry)await stateRef.set({lastBlock:to,updatedAt:FieldValue.serverTimestamp()},{merge:true});

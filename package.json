@@ -4,7 +4,8 @@
   "description": "Watches ERC-20 transfers to a wallet and activates Firestore subscriptions",
   "scripts": {
     "start": "node verificar-pagos.cjs",
-    "dry": "node verificar-pagos.cjs --dry-run"
+    "dry": "node verificar-pagos.cjs --dry-run",
+    "test": "node --test tests/*.test.cjs"
   },
   "engines": {
     "node": ">=20"

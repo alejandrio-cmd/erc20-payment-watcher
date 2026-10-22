@@ -55,6 +55,27 @@ function lockAccepts(lock,blockTimeMs,payableMinutes){
  if(blockTimeMs>created+payableMinutes*60000)return 'pago fuera de la ventana del pedido';
  return null;
 }
+// Pago que no coincide con ningun monto exacto (redondeo como 125.5, el precio sin los decimales, algo de mas
+// "por las dudas"). Candidatos: pedidos abiertos, dentro de su ventana, cuyo precio el pago cubre sin pasarse
+// del monto del pedido mas la tolerancia (config.approxToleranceUsd, USD 2 si no esta). Nunca planes de prueba.
+const APPROX_TOLERANCE_USD=2;
+function approxCandidates(locks,micro,blockTimeMs,{plans,payableMinutes,approxToleranceUsd=APPROX_TOLERANCE_USD}){
+ if(!Number.isInteger(micro)||micro<=0)return [];
+ const tolerance=Math.round(approxToleranceUsd*1e6);
+ return locks.filter(l=>{
+  const plan=l&&plans[l.planId];
+  return !!plan&&!plan.test&&plan.price>0&&l.priceUsd===plan.price&&Number.isInteger(l.amountMicro)
+   &&!lockAccepts(l,blockTimeMs,payableMinutes)&&micro>=plan.price*1e6&&micro<=l.amountMicro+tolerance;
+ });
+}
+// Se acredita solo si no hay duda: todos los candidatos son del mismo usuario y plan (si reabrio el checkout,
+// va a su ultimo pedido). Con dos usuarios posibles queda para revisar a mano.
+function pickApprox(candidates){
+ if(!candidates.length)return {lock:null,reason:'sin pedido con ese monto'};
+ const owners=new Set(candidates.map(l=>l.uid+'|'+l.planId));
+ if(owners.size>1)return {lock:null,reason:'monto aproximado: '+owners.size+' pedidos posibles'};
+ return {lock:[...candidates].sort((a,b)=>b.createdAtMs-a.createdAtMs)[0],reason:null};
+}
 // Nueva fecha de vencimiento: suma dias desde hoy, o desde el vencimiento actual si todavia esta vigente.
 function nextExpiry(sub,nowMs,days){
  const current=sub&&sub.active===true&&sub.expiresAtMs>nowMs?sub.expiresAtMs:nowMs;
@@ -77,6 +98,7 @@ function validateConfig(cfg){
   if(!p.grant||!/^[a-z0-9_]+$/.test(p.grant.plan||'')||p.grant.plan==='trial'||!Array.isArray(p.grant.rooms)||!p.grant.rooms.length)errors.push('grant invalido en '+id);
  }
  for(const [s,t] of Object.entries(cfg.tokens||{}))if(!/^0x[0-9a-fA-F]{40}$/.test(t.address))errors.push('token invalido: '+s);
+ if(cfg.approxToleranceUsd!=null&&!(typeof cfg.approxToleranceUsd==='number'&&cfg.approxToleranceUsd>=0))errors.push('approxToleranceUsd invalido');
  return errors;
 }
-module.exports={TRANSFER_TOPIC,TAG_STEP,TAG_MAX,amountMicro,formatMicro,padTopic,parseTransfer,lockAccepts,nextExpiry,mergeGrant,validateConfig};
+module.exports={TRANSFER_TOPIC,TAG_STEP,TAG_MAX,APPROX_TOLERANCE_USD,amountMicro,formatMicro,padTopic,parseTransfer,lockAccepts,approxCandidates,pickApprox,nextExpiry,mergeGrant,validateConfig};
